@@ -15,6 +15,7 @@
 //  ***************************************************************************/
 
 using System;
+using System.Numerics;
 using MP3Sharp.Decoding.Decoders.LayerIII;
 using MP3Sharp.Support;
 
@@ -1050,14 +1051,12 @@ namespace MP3Sharp.Decoding.Decoders {
 
             // 优化循环：减少数组访问和计算开销
             int nonZero = _Nonzero[ch];
-            int[] div18 = Div18;
-            int[] mod18 = Mod18;
+            int sb = 0;
+            int ss = 0;
             for (j = 0; j < nonZero; j++) {
-                int quotien = div18[j];
-                int reste = mod18[j];
                 int is1dValue = _Is1D[j];
                 if (is1dValue == 0) {
-                    xr1D[quotien][reste] = 0.0f;
+                    xr1D[sb][ss] = 0.0f;
                 } else {
                     int abv = is1dValue;
                     const double d43 = 4.0 / 3.0;
@@ -1076,7 +1075,12 @@ namespace MP3Sharp.Decoding.Decoders {
                             value = -gGain * (float)Math.Pow(abv, d43);
                         }
                     }
-                    xr1D[quotien][reste] = value;
+                    xr1D[sb][ss] = value;
+                }
+                ss++;
+                if (ss == SSLIMIT) {
+                    ss = 0;
+                    sb++;
                 }
             }
 
@@ -1087,9 +1091,9 @@ namespace MP3Sharp.Decoding.Decoders {
             bool mixedBlockFlag = grInfo.MixedBlockFlag != 0;
             bool preflag = grInfo.Preflag != 0;
             
+            sb = 0;
+            ss = 0;
             for (j = 0; j < nonZero; j++) {
-                int quotien = div18[j];
-                int reste = mod18[j];
                 
                 if (index == nextCbBoundary) {
                     /* Adjust critical band boundary */
@@ -1139,7 +1143,7 @@ namespace MP3Sharp.Decoding.Decoders {
                     int idx = _Scalefac[ch].S[tIndex][cb] << scaleFacScale;
                     idx += grInfo.SubblockGain[tIndex] << 2;
 
-                    xr1D[quotien][reste] *= TwoToNegativeHalfPow[idx];
+                    xr1D[sb][ss] *= TwoToNegativeHalfPow[idx];
                 }
                 else {
                     // LONG block types 0,1,3 & 1st 2 subbands of switched blocks
@@ -1149,17 +1153,29 @@ namespace MP3Sharp.Decoding.Decoders {
                         idx += Pretab[cb];
 
                     idx = idx << scaleFacScale;
-                    xr1D[quotien][reste] *= TwoToNegativeHalfPow[idx];
+                    xr1D[sb][ss] *= TwoToNegativeHalfPow[idx];
                 }
                 index++;
+                ss++;
+                if (ss == SSLIMIT) {
+                    ss = 0;
+                    sb++;
+                }
             }
 
             // 优化循环：使用更高效的计算方式
-            for (j = nonZero; j < 576; j++) {
-                int quotien = div18[j];
-                int reste = mod18[j];
-                // 移除不必要的边界检查，因为 j 是正整数，SSLIMIT 也是正整数
-                xr1D[quotien][reste] = 0.0f;
+            if (nonZero < 576) {
+                sb = nonZero / SSLIMIT;
+                ss = nonZero - sb * SSLIMIT;
+                for (j = nonZero; j < 576; j++) {
+                    // 移除不必要的边界检查，因为 j 是正整数，SSLIMIT 也是正整数
+                    xr1D[sb][ss] = 0.0f;
+                    ss++;
+                    if (ss == SSLIMIT) {
+                        ss = 0;
+                        sb++;
+                    }
+                }
             }
         }
 
@@ -1516,44 +1532,68 @@ namespace MP3Sharp.Decoding.Decoders {
                 }
                 // if (i_stereo)
 
-                i = 0;
                 float[][] ro0 = _Ro[0];
                 float[][] ro1 = _Ro[1];
                 float[][] lr0 = _Lr[0];
                 float[][] lr1 = _Lr[1];
-                for (sb = 0; sb < SBLIMIT; sb++) {
-                    float[] ro0sb = ro0[sb];
-                    float[] ro1sb = ro1[sb];
-                    float[] lr0sb = lr0[sb];
-                    float[] lr1sb = lr1[sb];
-                    for (ss = 0; ss < SSLIMIT; ss++) {
-                        if (IsPos[i] == 7) {
-                            if (msStereo) {
+                if (!iStereo) {
+                    for (sb = 0; sb < SBLIMIT; sb++) {
+                        float[] ro0sb = ro0[sb];
+                        float[] ro1sb = ro1[sb];
+                        float[] lr0sb = lr0[sb];
+                        float[] lr1sb = lr1[sb];
+                        if (msStereo) {
+                            for (ss = 0; ss < SSLIMIT; ss++) {
                                 float r0 = ro0sb[ss];
                                 float r1 = ro1sb[ss];
                                 lr0sb[ss] = (r0 + r1) * 0.707106781f;
                                 lr1sb[ss] = (r0 - r1) * 0.707106781f;
                             }
-                            else {
+                        }
+                        else {
+                            for (ss = 0; ss < SSLIMIT; ss++) {
                                 lr0sb[ss] = ro0sb[ss];
                                 lr1sb[ss] = ro1sb[ss];
                             }
                         }
-                        else if (iStereo) {
-                            float r0 = ro0sb[ss];
-                            if (lsf) {
-                                lr0sb[ss] = r0 * _K[0][i];
-                                lr1sb[ss] = r0 * _K[1][i];
+                    }
+                }
+                else {
+                    i = 0;
+                    for (sb = 0; sb < SBLIMIT; sb++) {
+                        float[] ro0sb = ro0[sb];
+                        float[] ro1sb = ro1[sb];
+                        float[] lr0sb = lr0[sb];
+                        float[] lr1sb = lr1[sb];
+                        for (ss = 0; ss < SSLIMIT; ss++) {
+                            if (IsPos[i] == 7) {
+                                if (msStereo) {
+                                    float r0 = ro0sb[ss];
+                                    float r1 = ro1sb[ss];
+                                    lr0sb[ss] = (r0 + r1) * 0.707106781f;
+                                    lr1sb[ss] = (r0 - r1) * 0.707106781f;
+                                }
+                                else {
+                                    lr0sb[ss] = ro0sb[ss];
+                                    lr1sb[ss] = ro1sb[ss];
+                                }
                             }
                             else {
-                                lr1sb[ss] = r0 / (1 + IsRatio[i]);
-                                lr0sb[ss] = lr1sb[ss] * IsRatio[i];
+                                float r0 = ro0sb[ss];
+                                if (lsf) {
+                                    lr0sb[ss] = r0 * _K[0][i];
+                                    lr1sb[ss] = r0 * _K[1][i];
+                                }
+                                else {
+                                    lr1sb[ss] = r0 / (1 + IsRatio[i]);
+                                    lr0sb[ss] = lr1sb[ss] * IsRatio[i];
+                                }
                             }
+                            /* else {
+                            System.out.println("Error in stereo processing\n");
+                            } */
+                            i++;
                         }
-                        /* else {
-                        System.out.println("Error in stereo processing\n");
-                        } */
-                        i++;
                     }
                 }
             }
@@ -1628,10 +1668,26 @@ namespace MP3Sharp.Decoding.Decoders {
             for (int sb = 0; sb < SSLIMIT; sb++) {
                 float[] lr0 = _Lr[0][sb];
                 float[] lr1 = _Lr[1][sb];
-                for (int ss = 0; ss < SSLIMIT; ss += 3) {
-                    lr0[ss] = (lr0[ss] + lr1[ss]) * 0.5f;
-                    lr0[ss + 1] = (lr0[ss + 1] + lr1[ss + 1]) * 0.5f;
-                    lr0[ss + 2] = (lr0[ss + 2] + lr1[ss + 2]) * 0.5f;
+                if (Vector.IsHardwareAccelerated) {
+                    int vecCount = Vector<float>.Count;
+                    int limit = SSLIMIT - (SSLIMIT % vecCount);
+                    var half = new Vector<float>(0.5f);
+                    int ss = 0;
+                    for (; ss < limit; ss += vecCount) {
+                        var v0 = new Vector<float>(lr0, ss);
+                        var v1 = new Vector<float>(lr1, ss);
+                        ((v0 + v1) * half).CopyTo(lr0, ss);
+                    }
+                    for (; ss < SSLIMIT; ss++) {
+                        lr0[ss] = (lr0[ss] + lr1[ss]) * 0.5f;
+                    }
+                }
+                else {
+                    for (int ss = 0; ss < SSLIMIT; ss += 3) {
+                        lr0[ss] = (lr0[ss] + lr1[ss]) * 0.5f;
+                        lr0[ss + 1] = (lr0[ss + 1] + lr1[ss + 1]) * 0.5f;
+                        lr0[ss + 2] = (lr0[ss + 2] + lr1[ss + 2]) * 0.5f;
+                    }
                 }
             }
         }
