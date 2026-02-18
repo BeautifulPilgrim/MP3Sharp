@@ -16,6 +16,11 @@
 
 using System;
 using System.Numerics;
+#if NET8_0_OR_GREATER
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+#endif
 using MP3Sharp.Decoding.Decoders.LayerIII;
 using MP3Sharp.Support;
 
@@ -1784,18 +1789,36 @@ namespace MP3Sharp.Decoding.Decoders {
 
                     tmpf0 *= 0.130526192f;
 
-                    outValues[sixI + 6] += tmpf0;
-                    outValues[sixI + 7] += tmpf1;
-                    outValues[sixI + 8] += tmpf2;
-                    outValues[sixI + 9] += tmpf3;
-                    outValues[sixI + 10] += tmpf4;
-                    outValues[sixI + 11] += tmpf5;
-                    outValues[sixI + 12] += tmpf6;
-                    outValues[sixI + 13] += tmpf7;
-                    outValues[sixI + 14] += tmpf8;
-                    outValues[sixI + 15] += tmpf9;
-                    outValues[sixI + 16] += tmpf10;
-                    outValues[sixI + 17] += tmpf11;
+#if NET8_0_OR_GREATER
+                    if (Sse.IsSupported) {
+                        unsafe {
+                            fixed (float* op = outValues) {
+                                Vector128<float> a0 = Vector128.Create(tmpf0, tmpf1, tmpf2, tmpf3);
+                                Vector128<float> a1 = Vector128.Create(tmpf4, tmpf5, tmpf6, tmpf7);
+                                Vector128<float> a2 = Vector128.Create(tmpf8, tmpf9, tmpf10, tmpf11);
+                                float* basePtr = op + sixI + 6;
+                                Sse.Store(basePtr, Sse.Add(Sse.LoadVector128(basePtr), a0));
+                                Sse.Store(basePtr + 4, Sse.Add(Sse.LoadVector128(basePtr + 4), a1));
+                                Sse.Store(basePtr + 8, Sse.Add(Sse.LoadVector128(basePtr + 8), a2));
+                            }
+                        }
+                    }
+                    else
+#endif
+                    {
+                        outValues[sixI + 6] += tmpf0;
+                        outValues[sixI + 7] += tmpf1;
+                        outValues[sixI + 8] += tmpf2;
+                        outValues[sixI + 9] += tmpf3;
+                        outValues[sixI + 10] += tmpf4;
+                        outValues[sixI + 11] += tmpf5;
+                        outValues[sixI + 12] += tmpf6;
+                        outValues[sixI + 13] += tmpf7;
+                        outValues[sixI + 14] += tmpf8;
+                        outValues[sixI + 15] += tmpf9;
+                        outValues[sixI + 16] += tmpf10;
+                        outValues[sixI + 17] += tmpf11;
+                    }
 
                     sixI += 6;
                 }

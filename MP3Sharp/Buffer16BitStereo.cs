@@ -15,6 +15,11 @@
 //  ***************************************************************************/
 
 using System;
+#if NET8_0_OR_GREATER
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+#endif
 using MP3Sharp.Decoding;
 
 namespace MP3Sharp {
@@ -110,11 +115,85 @@ namespace MP3Sharp {
             if (_BufferChannelOffsets == null || channel >= _BufferChannelOffsets.Length) {
                 throw new Exception("Song is closing...");
             }
+#if NET8_0_OR_GREATER
             int pos = _BufferChannelOffsets[channel];
-            // Always, 32 samples are appended
+            if (Avx.IsSupported) {
+                Vector256<float> max = Vector256.Create(32767.0f);
+                Vector256<float> min = Vector256.Create(-32767.0f);
+                unsafe {
+                    fixed (float* sp = samples)
+                    fixed (byte* bp = _Buffer) {
+                        int i = 0;
+                        float* tmp = stackalloc float[8];
+                        for (; i + 8 <= 32; i += 8) {
+                            Vector256<float> v = Avx.LoadVector256(sp + i);
+                            v = Avx.Max(min, Avx.Min(max, v));
+                            Avx.Store(tmp, v);
+                            for (int j = 0; j < 8; j++) {
+                                int sample = (int)tmp[j];
+                                bp[pos] = (byte)(sample & 0xff);
+                                bp[pos + 1] = (byte)(sample >> 8);
+                                if (DoubleMonoToStereo) {
+                                    bp[pos + 2] = (byte)(sample & 0xff);
+                                    bp[pos + 3] = (byte)(sample >> 8);
+                                }
+                                pos += OUTPUT_CHANNELS * 2;
+                            }
+                        }
+                    }
+                }
+            }
+            else if (Sse.IsSupported) {
+                Vector128<float> max = Vector128.Create(32767.0f);
+                Vector128<float> min = Vector128.Create(-32767.0f);
+                unsafe {
+                    fixed (float* sp = samples)
+                    fixed (byte* bp = _Buffer) {
+                        int i = 0;
+                        float* tmp = stackalloc float[4];
+                        for (; i + 4 <= 32; i += 4) {
+                            Vector128<float> v = Sse.LoadVector128(sp + i);
+                            v = Sse.Max(min, Sse.Min(max, v));
+                            Sse.Store(tmp, v);
+                            for (int j = 0; j < 4; j++) {
+                                int sample = (int)tmp[j];
+                                bp[pos] = (byte)(sample & 0xff);
+                                bp[pos + 1] = (byte)(sample >> 8);
+                                if (DoubleMonoToStereo) {
+                                    bp[pos + 2] = (byte)(sample & 0xff);
+                                    bp[pos + 3] = (byte)(sample >> 8);
+                                }
+                                pos += OUTPUT_CHANNELS * 2;
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                // scalar fallback
+                for (int i = 0; i < 32; i++) {
+                    float fs = samples[i];
+                    if (fs > 32767.0f) {
+                        fs = 32767.0f;
+                    }
+                    else if (fs < -32767.0f) {
+                        fs = -32767.0f;
+                    }
+                    int sample = (int)fs;
+                    _Buffer[pos] = (byte)(sample & 0xff);
+                    _Buffer[pos + 1] = (byte)(sample >> 8);
+                    if (DoubleMonoToStereo) {
+                        _Buffer[pos + 2] = (byte)(sample & 0xff);
+                        _Buffer[pos + 3] = (byte)(sample >> 8);
+                    }
+                    pos += OUTPUT_CHANNELS * 2;
+                }
+            }
+            _BufferChannelOffsets[channel] = pos;
+#else
+            int pos = _BufferChannelOffsets[channel];
             for (int i = 0; i < 32; i++) {
                 float fs = samples[i];
-                // clamp values
                 if (fs > 32767.0f) {
                     fs = 32767.0f;
                 }
@@ -131,6 +210,7 @@ namespace MP3Sharp {
                 pos += OUTPUT_CHANNELS * 2;
             }
             _BufferChannelOffsets[channel] = pos;
+#endif
         }
 
         /// <summary>
