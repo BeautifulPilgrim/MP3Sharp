@@ -81,6 +81,8 @@ namespace MP3Sharp.Decoding.Decoders {
         };
 
         private static int[][] _reorderTable; // Generated on demand
+        private static readonly int[] Div18 = new int[576];
+        private static readonly int[] Mod18 = new int[576];
 
         private static readonly float[] Cs = {
             0.857492925712f, 0.881741997318f, 0.949628649103f, 0.983314592492f, 0.995517816065f, 0.999160558175f,
@@ -201,6 +203,11 @@ namespace MP3Sharp.Decoding.Decoders {
             for (int i = 0; i < 256; i++) {
                 int x = i - 128;
                 TwoToQuarterPow[i] = (float)Math.Pow(2.0, 0.25 * x);
+            }
+            for (int i = 0; i < 576; i++) {
+                int q = i / SSLIMIT;
+                Div18[i] = q;
+                Mod18[i] = i - q * SSLIMIT;
             }
         }
 
@@ -1042,9 +1049,11 @@ namespace MP3Sharp.Decoding.Decoders {
 
             // 优化循环：减少数组访问和计算开销
             int nonZero = _Nonzero[ch];
+            int[] div18 = Div18;
+            int[] mod18 = Mod18;
             for (j = 0; j < nonZero; j++) {
-                int reste = j % SSLIMIT;
-                int quotien = j / SSLIMIT; // 更高效的计算方式
+                int quotien = div18[j];
+                int reste = mod18[j];
                 int is1dValue = _Is1D[j];
                 if (is1dValue == 0) {
                     xr1D[quotien][reste] = 0.0f;
@@ -1078,8 +1087,8 @@ namespace MP3Sharp.Decoding.Decoders {
             bool preflag = grInfo.Preflag != 0;
             
             for (j = 0; j < nonZero; j++) {
-                int reste = j % SSLIMIT;
-                int quotien = j / SSLIMIT; // 更高效的计算方式
+                int quotien = div18[j];
+                int reste = mod18[j];
                 
                 if (index == nextCbBoundary) {
                     /* Adjust critical band boundary */
@@ -1146,8 +1155,8 @@ namespace MP3Sharp.Decoding.Decoders {
 
             // 优化循环：使用更高效的计算方式
             for (j = nonZero; j < 576; j++) {
-                int reste = j % SSLIMIT;
-                int quotien = j / SSLIMIT; // 更高效的计算方式
+                int quotien = div18[j];
+                int reste = mod18[j];
                 // 移除不必要的边界检查，因为 j 是正整数，SSLIMIT 也是正整数
                 xr1D[quotien][reste] = 0.0f;
             }
@@ -1166,6 +1175,8 @@ namespace MP3Sharp.Decoding.Decoders {
             float[] out1D = _Out1D;
             int sfreq = _Sfreq;
             int[][] reorderTable = _reorderTable;
+            int[] div18 = Div18;
+            int[] mod18 = Mod18;
 
             bool windowSwitchingFlag = grInfo.WindowSwitchingFlag != 0;
             bool blockType2 = grInfo.BlockType == 2;
@@ -1178,8 +1189,8 @@ namespace MP3Sharp.Decoding.Decoders {
                 if (mixedBlockFlag) {
                     // NO REORDER FOR LOW 2 SUBBANDS
                     for (index = 0; index < 36; index++) {
-                        int reste = index % SSLIMIT;
-                        int quotien = index / SSLIMIT; // 更高效的计算方式
+                        int quotien = div18[index];
+                        int reste = mod18[index];
                         out1D[index] = xr1D[quotien][reste];
                     }
                     // REORDERING FOR REST SWITCHED SHORT
@@ -1192,22 +1203,22 @@ namespace MP3Sharp.Decoding.Decoders {
                         for (freq = 0, freq3 = 0; freq < sfbLines; freq++, freq3 += 3) {
                             srcLine = sfbStart3 + freq;
                             desLine = sfbStart3 + freq3;
-                            int reste = srcLine % SSLIMIT;
-                            int quotien = srcLine / SSLIMIT; // 更高效的计算方式
+                            int quotien = div18[srcLine];
+                            int reste = mod18[srcLine];
 
                             out1D[desLine] = xr1D[quotien][reste];
                             srcLine += sfbLines;
                             desLine++;
 
-                            reste = srcLine % SSLIMIT;
-                            quotien = srcLine / SSLIMIT; // 更高效的计算方式
+                            quotien = div18[srcLine];
+                            reste = mod18[srcLine];
 
                             out1D[desLine] = xr1D[quotien][reste];
                             srcLine += sfbLines;
                             desLine++;
 
-                            reste = srcLine % SSLIMIT;
-                            quotien = srcLine / SSLIMIT; // 更高效的计算方式
+                            quotien = div18[srcLine];
+                            reste = mod18[srcLine];
 
                             out1D[desLine] = xr1D[quotien][reste];
                         }
@@ -1218,8 +1229,8 @@ namespace MP3Sharp.Decoding.Decoders {
                     int[] rt = reorderTable[sfreq];
                     for (index = 0; index < 576; index++) {
                         int j = rt[index];
-                        int reste = j % SSLIMIT;
-                        int quotien = j / SSLIMIT; // 更高效的计算方式
+                        int quotien = div18[j];
+                        int reste = mod18[j];
                         out1D[index] = xr1D[quotien][reste];
                     }
                 }
@@ -1227,8 +1238,8 @@ namespace MP3Sharp.Decoding.Decoders {
             else {
                 // long blocks
                 for (index = 0; index < 576; index++) {
-                    int reste = index % SSLIMIT;
-                    int quotien = index / SSLIMIT; // 更高效的计算方式
+                    int quotien = div18[index];
+                    int reste = mod18[index];
                     out1D[index] = xr1D[quotien][reste];
                 }
             }
@@ -1282,7 +1293,7 @@ namespace MP3Sharp.Decoding.Decoders {
                                     i = (i << 2) - i + (j + 1) * lines - 1;
 
                                     while (lines > 0) {
-                                        if (_Ro[1][i / 18][i % 18] != 0.0f) {
+                                        if (_Ro[1][Div18[i]][Mod18[i]] != 0.0f) {
                                             // MDM: in java, array access is very slow.
                                             // Is quicker to compute div and mod values.
                                             //if (ro[1][ss_div[i]][ss_mod[i]] != 0.0f) {
@@ -1391,7 +1402,7 @@ namespace MP3Sharp.Decoding.Decoders {
                                     i = (temp << 2) - temp + (j + 1) * lines - 1;
 
                                     while (lines > 0) {
-                                        if (_Ro[1][i / 18][i % 18] != 0.0f) {
+                                        if (_Ro[1][Div18[i]][Mod18[i]] != 0.0f) {
                                             // MDM: in java, array access is very slow.
                                             // Is quicker to compute div and mod values.
                                             //if (ro[1][ss_div[i]][ss_mod[i]] != 0.0f) {
