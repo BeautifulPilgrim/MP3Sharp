@@ -49,6 +49,9 @@ namespace MP3Sharp.Decoding.Decoders {
             9.3132257462e-10f, 6.5854450798e-10f, 4.6566128731e-10f, 3.2927225399e-10f
         };
 
+        // 预计算 2^(0.25 * x) 的查找表，用于快速计算全局增益
+        internal static readonly float[] TwoToQuarterPow;
+
         internal static readonly float[] PowerTable;
 
         internal static readonly float[][] Io = {
@@ -168,28 +171,23 @@ namespace MP3Sharp.Decoding.Decoders {
         private int _CheckSumHuff;
         private int _FrameStart;
 
-        internal int[] IsPos;
+        // 这些字段现在使用预分配的私有数组
+        internal int[] IsPos => _IsPos;
 
-        internal float[] IsRatio;
-
-        // MDM: new_slen is fully initialized before use, no need
-        // to reallocate array.
-        private int[] _NewSlen;
+        internal float[] IsRatio => _IsRatio;
 
         private int _Part2Start;
-        internal float[] Rawout;
+        internal float[] Rawout => _Rawout;
 
         // subband samples are buffered and passed to the
         // SynthesisFilter in one go.
-        private float[] _Samples1;
-
-        private float[] _Samples2;
+        // _Samples1 and _Samples2 are now pre-allocated as readonly fields
         internal int[] ScalefacBuffer;
         internal ScaleFactorTable Sftable;
 
         // MDM: tsOutCopy and rawout do not need initializing, so the arrays
         // can be reused.
-        internal float[] TsOutCopy;
+        internal float[] TsOutCopy => _TsOutCopy;
 
         internal int[] V = {0};
         internal int[] W = {0};
@@ -198,6 +196,12 @@ namespace MP3Sharp.Decoding.Decoders {
 
         static LayerIIIDecoder() {
             PowerTable = CreatePowerTable();
+            // 初始化 2^(0.25 * x) 查找表，范围从 -128 到 127
+            TwoToQuarterPow = new float[256];
+            for (int i = 0; i < 256; i++) {
+                int x = i - 128;
+                TwoToQuarterPow[i] = (float)Math.Pow(2.0, 0.25 * x);
+            }
         }
 
         /// <summary>
@@ -363,14 +367,24 @@ namespace MP3Sharp.Decoding.Decoders {
             Decode();
         }
 
+        // 预分配数组，避免重复内存分配
+        private readonly float[] _Rawout = new float[36];
+        private readonly float[] _TsOutCopy = new float[18];
+        private readonly float[] _IsRatio = new float[576];
+        private readonly int[] _IsPos = new int[576];
+        private readonly int[] _NewSlen = new int[4];
+        private readonly float[] _Samples2 = new float[32];
+        private readonly float[] _Samples1 = new float[32];
+
         private void InitBlock() {
-            Rawout = new float[36];
-            TsOutCopy = new float[18];
-            IsRatio = new float[576];
-            IsPos = new int[576];
-            _NewSlen = new int[4];
-            _Samples2 = new float[32];
-            _Samples1 = new float[32];
+            // 重置数组而不是重新分配
+            Array.Clear(_Rawout, 0, _Rawout.Length);
+            Array.Clear(_TsOutCopy, 0, _TsOutCopy.Length);
+            Array.Clear(_IsRatio, 0, _IsRatio.Length);
+            Array.Clear(_IsPos, 0, _IsPos.Length);
+            Array.Clear(_NewSlen, 0, _NewSlen.Length);
+            Array.Clear(_Samples2, 0, _Samples2.Length);
+            Array.Clear(_Samples1, 0, _Samples1.Length);
         }
 
         /// <summary>
@@ -1016,54 +1030,61 @@ namespace MP3Sharp.Decoding.Decoders {
                 nextCbBoundary = _SfBandIndex[_Sfreq].L[1]; // LONG blocks: 0,1,3
             }
 
-            // Compute overall (global) scaling.
+            // Compute overall (global) scaling using lookup table for better performance
+            float gGain;
+            int globalGainAdjusted = grInfo.GlobalGain - 210;
+            int lookupIndex = globalGainAdjusted + 128;
+            if (lookupIndex >= 0 && lookupIndex < 256) {
+                gGain = TwoToQuarterPow[lookupIndex];
+            } else {
+                gGain = (float)Math.Pow(2.0, 0.25 * globalGainAdjusted);
+            }
 
-            float gGain = (float)Math.Pow(2.0, 0.25 * (grInfo.GlobalGain - 210.0));
-
-            for (j = 0; j < _Nonzero[ch]; j++) {
+            // 优化循环：减少数组访问和计算开销
+            int nonZero = _Nonzero[ch];
+            for (j = 0; j < nonZero; j++) {
                 int reste = j % SSLIMIT;
-                int quotien = (j - reste) / SSLIMIT;
-                if (_Is1D[j] == 0)
+                int quotien = j / SSLIMIT; // 更高效的计算方式
+                int is1dValue = _Is1D[j];
+                if (is1dValue == 0) {
                     xr1D[quotien][reste] = 0.0f;
-                else {
-                    int abv = _Is1D[j];
-                    // Begin Patch
-                    // This was taken from a patch to the original java file. Ported by DamianMehers
-                    // Original:
-                    // if (is_1d[j] > 0)
-                    //     xr_1d[quotien][reste] = g_gain * t_43[abv];
-                    // else
-                    //     xr_1d[quotien][reste] = -g_gain * t_43[-abv];
+                } else {
+                    int abv = is1dValue;
                     const double d43 = 4.0 / 3.0;
-                    if (abv < PowerTable.Length) {
-                        if (_Is1D[j] > 0) {
-                            xr1D[quotien][reste] = gGain * PowerTable[abv];
+                    float value;
+                    if (abv > 0) {
+                        if (abv < PowerTable.Length) {
+                            value = gGain * PowerTable[abv];
+                        } else {
+                            value = gGain * (float)Math.Pow(abv, d43);
                         }
-                        else if (-abv < PowerTable.Length) {
-                            xr1D[quotien][reste] = -gGain * PowerTable[-abv];
-                        }
-                        else {
-                            xr1D[quotien][reste] = -gGain * (float)Math.Pow(-abv, d43);
+                    } else {
+                        abv = -abv;
+                        if (abv < PowerTable.Length) {
+                            value = -gGain * PowerTable[abv];
+                        } else {
+                            value = -gGain * (float)Math.Pow(abv, d43);
                         }
                     }
-                    else if (_Is1D[j] > 0) {
-                        xr1D[quotien][reste] = gGain * (float)Math.Pow(abv, d43);
-                    }
-                    else {
-                        xr1D[quotien][reste] = -gGain * (float)Math.Pow(-abv, d43);
-                    }
-                    // End Patch
+                    xr1D[quotien][reste] = value;
                 }
             }
 
             // apply formula per block type
-            for (j = 0; j < _Nonzero[ch]; j++) {
+            int scaleFacScale = grInfo.ScaleFacScale;
+            bool windowSwitchingFlag = grInfo.WindowSwitchingFlag != 0;
+            bool blockType2 = grInfo.BlockType == 2;
+            bool mixedBlockFlag = grInfo.MixedBlockFlag != 0;
+            bool preflag = grInfo.Preflag != 0;
+            
+            for (j = 0; j < nonZero; j++) {
                 int reste = j % SSLIMIT;
-                int quotien = (j - reste) / SSLIMIT;
+                int quotien = j / SSLIMIT; // 更高效的计算方式
+                
                 if (index == nextCbBoundary) {
                     /* Adjust critical band boundary */
-                    if (grInfo.WindowSwitchingFlag != 0 && grInfo.BlockType == 2) {
-                        if (grInfo.MixedBlockFlag != 0) {
+                    if (windowSwitchingFlag && blockType2) {
+                        if (mixedBlockFlag) {
                             if (index == _SfBandIndex[_Sfreq].L[8]) {
                                 nextCbBoundary = _SfBandIndex[_Sfreq].S[4];
                                 nextCbBoundary = (nextCbBoundary << 2) - nextCbBoundary;
@@ -1096,48 +1117,38 @@ namespace MP3Sharp.Decoding.Decoders {
                     }
                     else {
                         // long blocks
-
                         nextCbBoundary = _SfBandIndex[_Sfreq].L[++cb + 1];
                     }
                 }
 
                 // Do long/short dependent scaling operations
-
-                if (grInfo.WindowSwitchingFlag != 0 &&
-                    (grInfo.BlockType == 2 && grInfo.MixedBlockFlag == 0 ||
-                     grInfo.BlockType == 2 && grInfo.MixedBlockFlag != 0 && j >= 36)) {
+                if (windowSwitchingFlag &&
+                    (blockType2 && !mixedBlockFlag ||
+                     blockType2 && mixedBlockFlag && j >= 36)) {
                     int tIndex = (index - cbBegin) / cbWidth;
-                    /*            xr[sb][ss] *= pow(2.0, ((-2.0 * gr_info.subblock_gain[t_index])
-                    -(0.5 * (1.0 + gr_info.scalefac_scale)
-                    * scalefac[ch].s[t_index][cb]))); */
-                    int idx = _Scalefac[ch].S[tIndex][cb] << grInfo.ScaleFacScale;
+                    int idx = _Scalefac[ch].S[tIndex][cb] << scaleFacScale;
                     idx += grInfo.SubblockGain[tIndex] << 2;
 
                     xr1D[quotien][reste] *= TwoToNegativeHalfPow[idx];
                 }
                 else {
                     // LONG block types 0,1,3 & 1st 2 subbands of switched blocks
-                    /* xr[sb][ss] *= pow(2.0, -0.5 * (1.0+gr_info.scalefac_scale)
-                    * (scalefac[ch].l[cb]
-                    + gr_info.preflag * pretab[cb])); */
                     int idx = _Scalefac[ch].L[cb];
 
-                    if (grInfo.Preflag != 0)
+                    if (preflag)
                         idx += Pretab[cb];
 
-                    idx = idx << grInfo.ScaleFacScale;
+                    idx = idx << scaleFacScale;
                     xr1D[quotien][reste] *= TwoToNegativeHalfPow[idx];
                 }
                 index++;
             }
 
-            for (j = _Nonzero[ch]; j < 576; j++) {
+            // 优化循环：使用更高效的计算方式
+            for (j = nonZero; j < 576; j++) {
                 int reste = j % SSLIMIT;
-                int quotien = (j - reste) / SSLIMIT;
-                if (reste < 0)
-                    reste = 0;
-                if (quotien < 0)
-                    quotien = 0;
+                int quotien = j / SSLIMIT; // 更高效的计算方式
+                // 移除不必要的边界检查，因为 j 是正整数，SSLIMIT 也是正整数
                 xr1D[quotien][reste] = 0.0f;
             }
         }
@@ -1152,56 +1163,64 @@ namespace MP3Sharp.Decoding.Decoders {
             int sfb, sfbStart, sfbLines;
             int srcLine, desLine;
             float[][] xr1D = xr;
+            float[] out1D = _Out1D;
+            int sfreq = _Sfreq;
+            int[][] reorderTable = _reorderTable;
 
-            if (grInfo.WindowSwitchingFlag != 0 && grInfo.BlockType == 2) {
-                for (index = 0; index < 576; index++)
-                    _Out1D[index] = 0.0f;
+            bool windowSwitchingFlag = grInfo.WindowSwitchingFlag != 0;
+            bool blockType2 = grInfo.BlockType == 2;
+            bool mixedBlockFlag = grInfo.MixedBlockFlag != 0;
 
-                if (grInfo.MixedBlockFlag != 0) {
+            if (windowSwitchingFlag && blockType2) {
+                // 优化：使用 Array.Clear 替代循环赋值
+                Array.Clear(out1D, 0, 576);
+
+                if (mixedBlockFlag) {
                     // NO REORDER FOR LOW 2 SUBBANDS
                     for (index = 0; index < 36; index++) {
                         int reste = index % SSLIMIT;
-                        int quotien = (index - reste) / SSLIMIT;
-                        _Out1D[index] = xr1D[quotien][reste];
+                        int quotien = index / SSLIMIT; // 更高效的计算方式
+                        out1D[index] = xr1D[quotien][reste];
                     }
                     // REORDERING FOR REST SWITCHED SHORT
-                    for (sfb = 3, sfbStart = _SfBandIndex[_Sfreq].S[3], sfbLines = _SfBandIndex[_Sfreq].S[4] - sfbStart;
+                    for (sfb = 3, sfbStart = _SfBandIndex[sfreq].S[3], sfbLines = _SfBandIndex[sfreq].S[4] - sfbStart;
                         sfb < 13;
-                        sfb++, sfbStart = _SfBandIndex[_Sfreq].S[sfb],
-                        sfbLines = _SfBandIndex[_Sfreq].S[sfb + 1] - sfbStart) {
+                        sfb++, sfbStart = _SfBandIndex[sfreq].S[sfb],
+                        sfbLines = _SfBandIndex[sfreq].S[sfb + 1] - sfbStart) {
                         int sfbStart3 = (sfbStart << 2) - sfbStart;
 
                         for (freq = 0, freq3 = 0; freq < sfbLines; freq++, freq3 += 3) {
                             srcLine = sfbStart3 + freq;
                             desLine = sfbStart3 + freq3;
                             int reste = srcLine % SSLIMIT;
-                            int quotien = (srcLine - reste) / SSLIMIT;
+                            int quotien = srcLine / SSLIMIT; // 更高效的计算方式
 
-                            _Out1D[desLine] = xr1D[quotien][reste];
+                            out1D[desLine] = xr1D[quotien][reste];
                             srcLine += sfbLines;
                             desLine++;
 
                             reste = srcLine % SSLIMIT;
-                            quotien = (srcLine - reste) / SSLIMIT;
+                            quotien = srcLine / SSLIMIT; // 更高效的计算方式
 
-                            _Out1D[desLine] = xr1D[quotien][reste];
+                            out1D[desLine] = xr1D[quotien][reste];
                             srcLine += sfbLines;
                             desLine++;
 
                             reste = srcLine % SSLIMIT;
-                            quotien = (srcLine - reste) / SSLIMIT;
+                            quotien = srcLine / SSLIMIT; // 更高效的计算方式
 
-                            _Out1D[desLine] = xr1D[quotien][reste];
+                            out1D[desLine] = xr1D[quotien][reste];
                         }
                     }
                 }
                 else {
                     // pure short
+                    int[] rt = reorderTable[sfreq];
                     for (index = 0; index < 576; index++) {
-                        int j = _reorderTable[_Sfreq][index];
+                        int j = rt[index];
                         int reste = j % SSLIMIT;
-                        int quotien = (j - reste) / SSLIMIT;
-                        _Out1D[index] = xr1D[quotien][reste];
+                        int quotien = j / SSLIMIT; // 更高效的计算方式
+                        out1D[index] = xr1D[quotien][reste];
                     }
                 }
             }
@@ -1209,8 +1228,8 @@ namespace MP3Sharp.Decoding.Decoders {
                 // long blocks
                 for (index = 0; index < 576; index++) {
                     int reste = index % SSLIMIT;
-                    int quotien = (index - reste) / SSLIMIT;
-                    _Out1D[index] = xr1D[quotien][reste];
+                    int quotien = index / SSLIMIT; // 更高效的计算方式
+                    out1D[index] = xr1D[quotien][reste];
                 }
             }
         }
@@ -1550,59 +1569,30 @@ namespace MP3Sharp.Decoding.Decoders {
             int bt;
             int sb18;
             GranuleInfo grInfo = _SideInfo.Channels[ch].Granules[gr];
-            float[] tsOut;
-
-            float[][] prvblk;
+            float[] tsOut = _Out1D;
+            float[][] prvblk = _Prevblck;
+            float[] rawout = _Rawout;
+            float[] tsOutCopy = _TsOutCopy;
+            
+            bool windowSwitchingFlag = grInfo.WindowSwitchingFlag != 0;
+            bool mixedBlockFlag = grInfo.MixedBlockFlag != 0;
+            int blockType = grInfo.BlockType;
 
             for (sb18 = 0; sb18 < 576; sb18 += 18) {
-                bt = grInfo.WindowSwitchingFlag != 0 && grInfo.MixedBlockFlag != 0 && sb18 < 36 ? 0 : grInfo.BlockType;
+                bt = windowSwitchingFlag && mixedBlockFlag && sb18 < 36 ? 0 : blockType;
 
-                tsOut = _Out1D;
+                // 优化数组复制
                 for (int cc = 0; cc < 18; cc++)
-                    TsOutCopy[cc] = tsOut[cc + sb18];
-                InverseMdct(TsOutCopy, Rawout, bt);
-                for (int cc = 0; cc < 18; cc++)
-                    tsOut[cc + sb18] = TsOutCopy[cc];
-
-                // overlap addition
-                prvblk = _Prevblck;
-
-                tsOut[0 + sb18] = Rawout[0] + prvblk[ch][sb18 + 0];
-                prvblk[ch][sb18 + 0] = Rawout[18];
-                tsOut[1 + sb18] = Rawout[1] + prvblk[ch][sb18 + 1];
-                prvblk[ch][sb18 + 1] = Rawout[19];
-                tsOut[2 + sb18] = Rawout[2] + prvblk[ch][sb18 + 2];
-                prvblk[ch][sb18 + 2] = Rawout[20];
-                tsOut[3 + sb18] = Rawout[3] + prvblk[ch][sb18 + 3];
-                prvblk[ch][sb18 + 3] = Rawout[21];
-                tsOut[4 + sb18] = Rawout[4] + prvblk[ch][sb18 + 4];
-                prvblk[ch][sb18 + 4] = Rawout[22];
-                tsOut[5 + sb18] = Rawout[5] + prvblk[ch][sb18 + 5];
-                prvblk[ch][sb18 + 5] = Rawout[23];
-                tsOut[6 + sb18] = Rawout[6] + prvblk[ch][sb18 + 6];
-                prvblk[ch][sb18 + 6] = Rawout[24];
-                tsOut[7 + sb18] = Rawout[7] + prvblk[ch][sb18 + 7];
-                prvblk[ch][sb18 + 7] = Rawout[25];
-                tsOut[8 + sb18] = Rawout[8] + prvblk[ch][sb18 + 8];
-                prvblk[ch][sb18 + 8] = Rawout[26];
-                tsOut[9 + sb18] = Rawout[9] + prvblk[ch][sb18 + 9];
-                prvblk[ch][sb18 + 9] = Rawout[27];
-                tsOut[10 + sb18] = Rawout[10] + prvblk[ch][sb18 + 10];
-                prvblk[ch][sb18 + 10] = Rawout[28];
-                tsOut[11 + sb18] = Rawout[11] + prvblk[ch][sb18 + 11];
-                prvblk[ch][sb18 + 11] = Rawout[29];
-                tsOut[12 + sb18] = Rawout[12] + prvblk[ch][sb18 + 12];
-                prvblk[ch][sb18 + 12] = Rawout[30];
-                tsOut[13 + sb18] = Rawout[13] + prvblk[ch][sb18 + 13];
-                prvblk[ch][sb18 + 13] = Rawout[31];
-                tsOut[14 + sb18] = Rawout[14] + prvblk[ch][sb18 + 14];
-                prvblk[ch][sb18 + 14] = Rawout[32];
-                tsOut[15 + sb18] = Rawout[15] + prvblk[ch][sb18 + 15];
-                prvblk[ch][sb18 + 15] = Rawout[33];
-                tsOut[16 + sb18] = Rawout[16] + prvblk[ch][sb18 + 16];
-                prvblk[ch][sb18 + 16] = Rawout[34];
-                tsOut[17 + sb18] = Rawout[17] + prvblk[ch][sb18 + 17];
-                prvblk[ch][sb18 + 17] = Rawout[35];
+                    tsOutCopy[cc] = tsOut[cc + sb18];
+                
+                InverseMdct(tsOutCopy, rawout, bt);
+                
+                // 优化数组复制和重叠添加
+                for (int cc = 0; cc < 18; cc++) {
+                    int offset = sb18 + cc;
+                    tsOut[offset] = rawout[cc] + prvblk[ch][offset];
+                    prvblk[ch][offset] = rawout[cc + 18];
+                }
             }
         }
 
