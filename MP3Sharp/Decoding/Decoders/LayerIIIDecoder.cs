@@ -1705,8 +1705,111 @@ namespace MP3Sharp.Decoding.Decoders {
             float tmpf10, tmpf11, tmpf12, tmpf13, tmpf14, tmpf15, tmpf16, tmpf17;
 
             if (blockType == 2) {
+#if NET8_0_OR_GREATER
                 Array.Clear(outValues, 0, 36);
+                unsafe {
+                    fixed (float* ip = inValues)
+                    fixed (float* op = outValues) {
+                        int sixI = 0;
+                        for (int i = 0; i < 3; i++) {
+                            int i0 = i;
+                            int i3 = i + 3;
+                            int i6 = i + 6;
+                            int i9 = i + 9;
+                            int i12 = i + 12;
+                            int i15 = i + 15;
 
+                            ip[i15] += ip[i12];
+                            ip[i12] += ip[i9];
+                            ip[i9] += ip[i6];
+                            ip[i6] += ip[i3];
+                            ip[i3] += ip[i0];
+
+                            ip[i15] += ip[i9];
+                            ip[i9] += ip[i3];
+
+                            float pp2 = ip[i12] * 0.500000000f;
+                            float pp1 = ip[i6] * 0.866025403f;
+                            float sum = ip[i0] + pp2;
+                            tmpf1 = ip[i0] - ip[i12];
+                            tmpf0 = sum + pp1;
+                            tmpf2 = sum - pp1;
+
+                            pp2 = ip[i15] * 0.500000000f;
+                            pp1 = ip[i9] * 0.866025403f;
+                            sum = ip[i3] + pp2;
+                            tmpf4 = ip[i3] - ip[i15];
+                            tmpf5 = sum + pp1;
+                            tmpf3 = sum - pp1;
+
+                            tmpf3 *= 1.931851653f;
+                            tmpf4 *= 0.707106781f;
+                            tmpf5 *= 0.517638090f;
+
+                            float save = tmpf0;
+                            tmpf0 += tmpf5;
+                            tmpf5 = save - tmpf5;
+                            save = tmpf1;
+                            tmpf1 += tmpf4;
+                            tmpf4 = save - tmpf4;
+                            save = tmpf2;
+                            tmpf2 += tmpf3;
+                            tmpf3 = save - tmpf3;
+
+                            tmpf0 *= 0.504314480f;
+                            tmpf1 *= 0.541196100f;
+                            tmpf2 *= 0.630236207f;
+                            tmpf3 *= 0.821339815f;
+                            tmpf4 *= 1.306562965f;
+                            tmpf5 *= 3.830648788f;
+
+                            tmpf8 = -tmpf0 * 0.793353340f;
+                            tmpf9 = -tmpf0 * 0.608761429f;
+                            tmpf7 = -tmpf1 * 0.923879532f;
+                            tmpf10 = -tmpf1 * 0.382683432f;
+                            tmpf6 = -tmpf2 * 0.991444861f;
+                            tmpf11 = -tmpf2 * 0.130526192f;
+
+                            tmpf0 = tmpf3;
+                            tmpf1 = tmpf4 * 0.382683432f;
+                            tmpf2 = tmpf5 * 0.608761429f;
+
+                            tmpf3 = -tmpf5 * 0.793353340f;
+                            tmpf4 = -tmpf4 * 0.923879532f;
+                            tmpf5 = -tmpf0 * 0.991444861f;
+
+                            tmpf0 *= 0.130526192f;
+
+                            if (Sse.IsSupported) {
+                                Vector128<float> a0 = Vector128.Create(tmpf0, tmpf1, tmpf2, tmpf3);
+                                Vector128<float> a1 = Vector128.Create(tmpf4, tmpf5, tmpf6, tmpf7);
+                                Vector128<float> a2 = Vector128.Create(tmpf8, tmpf9, tmpf10, tmpf11);
+                                float* basePtr = op + sixI + 6;
+                                Sse.Store(basePtr, Sse.Add(Sse.LoadVector128(basePtr), a0));
+                                Sse.Store(basePtr + 4, Sse.Add(Sse.LoadVector128(basePtr + 4), a1));
+                                Sse.Store(basePtr + 8, Sse.Add(Sse.LoadVector128(basePtr + 8), a2));
+                            }
+                            else {
+                                op[sixI + 6] += tmpf0;
+                                op[sixI + 7] += tmpf1;
+                                op[sixI + 8] += tmpf2;
+                                op[sixI + 9] += tmpf3;
+                                op[sixI + 10] += tmpf4;
+                                op[sixI + 11] += tmpf5;
+                                op[sixI + 12] += tmpf6;
+                                op[sixI + 13] += tmpf7;
+                                op[sixI + 14] += tmpf8;
+                                op[sixI + 15] += tmpf9;
+                                op[sixI + 16] += tmpf10;
+                                op[sixI + 17] += tmpf11;
+                            }
+
+                            sixI += 6;
+                        }
+                    }
+                }
+#else
+                Array.Clear(outValues, 0, 36);
                 int sixI = 0;
 
                 int i;
@@ -1822,6 +1925,7 @@ namespace MP3Sharp.Decoding.Decoders {
 
                     sixI += 6;
                 }
+#endif
             }
             else {
                 // 36 point IDCT

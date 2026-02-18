@@ -23,7 +23,7 @@ namespace MP3Sharp.Decoding {
     internal sealed class Huffman {
         private const int MXOFF = 250;
         private const int HTN = 34;
-        private const int LOOKUP_BITS = 10;
+        private const int LOOKUP_BITS = 13;
         private static readonly int[][] ValTab0 = {new[] {0, 0}};
 
         private static readonly int[][] ValTab1 = {
