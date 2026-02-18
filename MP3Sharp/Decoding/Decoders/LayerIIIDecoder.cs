@@ -1020,21 +1020,22 @@ namespace MP3Sharp.Decoding.Decoders {
             int index = 0;
             int j;
             float[][] xr1D = xr;
+            SBI sfBand = _SfBandIndex[_Sfreq];
 
             // choose correct scalefactor band per block type, initalize boundary
 
             if (grInfo.WindowSwitchingFlag != 0 && grInfo.BlockType == 2) {
                 if (grInfo.MixedBlockFlag != 0)
-                    nextCbBoundary = _SfBandIndex[_Sfreq].L[1];
+                    nextCbBoundary = sfBand.L[1];
                 // LONG blocks: 0,1,3
                 else {
-                    cbWidth = _SfBandIndex[_Sfreq].S[1];
+                    cbWidth = sfBand.S[1];
                     nextCbBoundary = (cbWidth << 2) - cbWidth;
                     cbBegin = 0;
                 }
             }
             else {
-                nextCbBoundary = _SfBandIndex[_Sfreq].L[1]; // LONG blocks: 0,1,3
+                nextCbBoundary = sfBand.L[1]; // LONG blocks: 0,1,3
             }
 
             // Compute overall (global) scaling using lookup table for better performance
@@ -1094,39 +1095,39 @@ namespace MP3Sharp.Decoding.Decoders {
                     /* Adjust critical band boundary */
                     if (windowSwitchingFlag && blockType2) {
                         if (mixedBlockFlag) {
-                            if (index == _SfBandIndex[_Sfreq].L[8]) {
-                                nextCbBoundary = _SfBandIndex[_Sfreq].S[4];
+                            if (index == sfBand.L[8]) {
+                                nextCbBoundary = sfBand.S[4];
                                 nextCbBoundary = (nextCbBoundary << 2) - nextCbBoundary;
                                 cb = 3;
-                                cbWidth = _SfBandIndex[_Sfreq].S[4] - _SfBandIndex[_Sfreq].S[3];
+                                cbWidth = sfBand.S[4] - sfBand.S[3];
 
-                                cbBegin = _SfBandIndex[_Sfreq].S[3];
+                                cbBegin = sfBand.S[3];
                                 cbBegin = (cbBegin << 2) - cbBegin;
                             }
-                            else if (index < _SfBandIndex[_Sfreq].L[8]) {
-                                nextCbBoundary = _SfBandIndex[_Sfreq].L[++cb + 1];
+                            else if (index < sfBand.L[8]) {
+                                nextCbBoundary = sfBand.L[++cb + 1];
                             }
                             else {
-                                nextCbBoundary = _SfBandIndex[_Sfreq].S[++cb + 1];
+                                nextCbBoundary = sfBand.S[++cb + 1];
                                 nextCbBoundary = (nextCbBoundary << 2) - nextCbBoundary;
 
-                                cbBegin = _SfBandIndex[_Sfreq].S[cb];
-                                cbWidth = _SfBandIndex[_Sfreq].S[cb + 1] - cbBegin;
+                                cbBegin = sfBand.S[cb];
+                                cbWidth = sfBand.S[cb + 1] - cbBegin;
                                 cbBegin = (cbBegin << 2) - cbBegin;
                             }
                         }
                         else {
-                            nextCbBoundary = _SfBandIndex[_Sfreq].S[++cb + 1];
+                            nextCbBoundary = sfBand.S[++cb + 1];
                             nextCbBoundary = (nextCbBoundary << 2) - nextCbBoundary;
 
-                            cbBegin = _SfBandIndex[_Sfreq].S[cb];
-                            cbWidth = _SfBandIndex[_Sfreq].S[cb + 1] - cbBegin;
+                            cbBegin = sfBand.S[cb];
+                            cbWidth = sfBand.S[cb + 1] - cbBegin;
                             cbBegin = (cbBegin << 2) - cbBegin;
                         }
                     }
                     else {
                         // long blocks
-                        nextCbBoundary = _SfBandIndex[_Sfreq].L[++cb + 1];
+                        nextCbBoundary = sfBand.L[++cb + 1];
                     }
                 }
 
@@ -1174,6 +1175,7 @@ namespace MP3Sharp.Decoding.Decoders {
             float[][] xr1D = xr;
             float[] out1D = _Out1D;
             int sfreq = _Sfreq;
+            SBI sfBand = _SfBandIndex[sfreq];
             int[][] reorderTable = _reorderTable;
             int[] div18 = Div18;
             int[] mod18 = Mod18;
@@ -1194,10 +1196,10 @@ namespace MP3Sharp.Decoding.Decoders {
                         out1D[index] = xr1D[quotien][reste];
                     }
                     // REORDERING FOR REST SWITCHED SHORT
-                    for (sfb = 3, sfbStart = _SfBandIndex[sfreq].S[3], sfbLines = _SfBandIndex[sfreq].S[4] - sfbStart;
+                    for (sfb = 3, sfbStart = sfBand.S[3], sfbLines = sfBand.S[4] - sfbStart;
                         sfb < 13;
-                        sfb++, sfbStart = _SfBandIndex[sfreq].S[sfb],
-                        sfbLines = _SfBandIndex[sfreq].S[sfb + 1] - sfbStart) {
+                        sfb++, sfbStart = sfBand.S[sfb],
+                        sfbLines = sfBand.S[sfb + 1] - sfbStart) {
                         int sfbStart3 = (sfbStart << 2) - sfbStart;
 
                         for (freq = 0, freq3 = 0; freq < sfbLines; freq++, freq3 += 3) {
@@ -1264,6 +1266,7 @@ namespace MP3Sharp.Decoding.Decoders {
                 int sfb;
                 int i;
                 int lines, temp, temp2;
+                SBI sfBand = _SfBandIndex[_Sfreq];
 
                 bool msStereo = _Header.Mode() == Header.JOINT_STEREO && (modeExt & 0x2) != 0;
                 bool iStereo = _Header.Mode() == Header.JOINT_STEREO && (modeExt & 0x1) != 0;
@@ -1288,8 +1291,8 @@ namespace MP3Sharp.Decoding.Decoders {
                                 int sfbcnt;
                                 sfbcnt = 2;
                                 for (sfb = 12; sfb >= 3; sfb--) {
-                                    i = _SfBandIndex[_Sfreq].S[sfb];
-                                    lines = _SfBandIndex[_Sfreq].S[sfb + 1] - i;
+                                    i = sfBand.S[sfb];
+                                    lines = sfBand.S[sfb + 1] - i;
                                     i = (i << 2) - i + (j + 1) * lines - 1;
 
                                     while (lines > 0) {
@@ -1313,8 +1316,8 @@ namespace MP3Sharp.Decoding.Decoders {
                                     maxSfb = sfb;
 
                                 while (sfb < 12) {
-                                    temp = _SfBandIndex[_Sfreq].S[sfb];
-                                    sb = _SfBandIndex[_Sfreq].S[sfb + 1] - temp;
+                                    temp = sfBand.S[sfb];
+                                    sb = sfBand.S[sfb + 1] - temp;
                                     i = (temp << 2) - temp + j * sb;
 
                                     for (; sb > 0; sb--) {
@@ -1330,11 +1333,11 @@ namespace MP3Sharp.Decoding.Decoders {
                                     // for (; sb>0...
                                     sfb++;
                                 } // while (sfb < 12)
-                                sfb = _SfBandIndex[_Sfreq].S[10];
-                                sb = _SfBandIndex[_Sfreq].S[11] - sfb;
+                                sfb = sfBand.S[10];
+                                sb = sfBand.S[11] - sfb;
                                 sfb = (sfb << 2) - sfb + j * sb;
-                                temp = _SfBandIndex[_Sfreq].S[11];
-                                sb = _SfBandIndex[_Sfreq].S[12] - temp;
+                                temp = sfBand.S[11];
+                                sb = sfBand.S[12] - temp;
                                 i = (temp << 2) - temp + j * sb;
 
                                 for (; sb > 0; sb--) {
@@ -1370,12 +1373,12 @@ namespace MP3Sharp.Decoding.Decoders {
                                     // if (ro ...
                                 } // while (i>=0)
                                 i = 0;
-                                while (_SfBandIndex[_Sfreq].L[i] <= sb)
+                                while (sfBand.L[i] <= sb)
                                     i++;
                                 sfb = i;
-                                i = _SfBandIndex[_Sfreq].L[i];
+                                i = sfBand.L[i];
                                 for (; sfb < 8; sfb++) {
-                                    sb = _SfBandIndex[_Sfreq].L[sfb + 1] - _SfBandIndex[_Sfreq].L[sfb];
+                                    sb = sfBand.L[sfb + 1] - sfBand.L[sfb];
                                     for (; sb > 0; sb--) {
                                         IsPos[i] = _Scalefac[1].L[sfb];
                                         if (IsPos[i] != 7)
@@ -1397,8 +1400,8 @@ namespace MP3Sharp.Decoding.Decoders {
                                 int sfbcnt;
                                 sfbcnt = -1;
                                 for (sfb = 12; sfb >= 0; sfb--) {
-                                    temp = _SfBandIndex[_Sfreq].S[sfb];
-                                    lines = _SfBandIndex[_Sfreq].S[sfb + 1] - temp;
+                                    temp = sfBand.S[sfb];
+                                    lines = sfBand.S[sfb + 1] - temp;
                                     i = (temp << 2) - temp + (j + 1) * lines - 1;
 
                                     while (lines > 0) {
@@ -1417,8 +1420,8 @@ namespace MP3Sharp.Decoding.Decoders {
                                 // for (sfb=12 ...
                                 sfb = sfbcnt + 1;
                                 while (sfb < 12) {
-                                    temp = _SfBandIndex[_Sfreq].S[sfb];
-                                    sb = _SfBandIndex[_Sfreq].S[sfb + 1] - temp;
+                                    temp = sfBand.S[sfb];
+                                    sb = sfBand.S[sfb + 1] - temp;
                                     i = (temp << 2) - temp + j * sb;
                                     for (; sb > 0; sb--) {
                                         IsPos[i] = _Scalefac[1].S[j][sfb];
@@ -1433,11 +1436,11 @@ namespace MP3Sharp.Decoding.Decoders {
                                     sfb++;
                                 } // while (sfb<12)
 
-                                temp = _SfBandIndex[_Sfreq].S[10];
-                                temp2 = _SfBandIndex[_Sfreq].S[11];
+                                temp = sfBand.S[10];
+                                temp2 = sfBand.S[11];
                                 sb = temp2 - temp;
                                 sfb = (temp << 2) - temp + j * sb;
-                                sb = _SfBandIndex[_Sfreq].S[12] - temp2;
+                                sb = sfBand.S[12] - temp2;
                                 i = (temp2 << 2) - temp2 + j * sb;
 
                                 for (; sb > 0; sb--) {
@@ -1477,13 +1480,13 @@ namespace MP3Sharp.Decoding.Decoders {
                             }
                         }
                         i = 0;
-                        while (_SfBandIndex[_Sfreq].L[i] <= sb)
+                        while (sfBand.L[i] <= sb)
                             i++;
 
                         sfb = i;
-                        i = _SfBandIndex[_Sfreq].L[i];
+                        i = sfBand.L[i];
                         for (; sfb < 21; sfb++) {
-                            sb = _SfBandIndex[_Sfreq].L[sfb + 1] - _SfBandIndex[_Sfreq].L[sfb];
+                            sb = sfBand.L[sfb + 1] - sfBand.L[sfb];
                             for (; sb > 0; sb--) {
                                 IsPos[i] = _Scalefac[1].L[sfb];
                                 if (IsPos[i] != 7)
@@ -1494,8 +1497,8 @@ namespace MP3Sharp.Decoding.Decoders {
                                 i++;
                             }
                         }
-                        sfb = _SfBandIndex[_Sfreq].L[20];
-                        for (sb = 576 - _SfBandIndex[_Sfreq].L[21]; sb > 0 && i < 576; sb--) {
+                        sfb = sfBand.L[20];
+                        for (sb = 576 - sfBand.L[21]; sb > 0 && i < 576; sb--) {
                             IsPos[i] = IsPos[sfb]; // error here : i >=576
 
                             if (lsf) {
@@ -1514,26 +1517,37 @@ namespace MP3Sharp.Decoding.Decoders {
                 // if (i_stereo)
 
                 i = 0;
-                for (sb = 0; sb < SBLIMIT; sb++)
+                float[][] ro0 = _Ro[0];
+                float[][] ro1 = _Ro[1];
+                float[][] lr0 = _Lr[0];
+                float[][] lr1 = _Lr[1];
+                for (sb = 0; sb < SBLIMIT; sb++) {
+                    float[] ro0sb = ro0[sb];
+                    float[] ro1sb = ro1[sb];
+                    float[] lr0sb = lr0[sb];
+                    float[] lr1sb = lr1[sb];
                     for (ss = 0; ss < SSLIMIT; ss++) {
                         if (IsPos[i] == 7) {
                             if (msStereo) {
-                                _Lr[0][sb][ss] = (_Ro[0][sb][ss] + _Ro[1][sb][ss]) * 0.707106781f;
-                                _Lr[1][sb][ss] = (_Ro[0][sb][ss] - _Ro[1][sb][ss]) * 0.707106781f;
+                                float r0 = ro0sb[ss];
+                                float r1 = ro1sb[ss];
+                                lr0sb[ss] = (r0 + r1) * 0.707106781f;
+                                lr1sb[ss] = (r0 - r1) * 0.707106781f;
                             }
                             else {
-                                _Lr[0][sb][ss] = _Ro[0][sb][ss];
-                                _Lr[1][sb][ss] = _Ro[1][sb][ss];
+                                lr0sb[ss] = ro0sb[ss];
+                                lr1sb[ss] = ro1sb[ss];
                             }
                         }
                         else if (iStereo) {
+                            float r0 = ro0sb[ss];
                             if (lsf) {
-                                _Lr[0][sb][ss] = _Ro[0][sb][ss] * _K[0][i];
-                                _Lr[1][sb][ss] = _Ro[0][sb][ss] * _K[1][i];
+                                lr0sb[ss] = r0 * _K[0][i];
+                                lr1sb[ss] = r0 * _K[1][i];
                             }
                             else {
-                                _Lr[1][sb][ss] = _Ro[0][sb][ss] / (1 + IsRatio[i]);
-                                _Lr[0][sb][ss] = _Lr[1][sb][ss] * IsRatio[i];
+                                lr1sb[ss] = r0 / (1 + IsRatio[i]);
+                                lr0sb[ss] = lr1sb[ss] * IsRatio[i];
                             }
                         }
                         /* else {
@@ -1541,6 +1555,7 @@ namespace MP3Sharp.Decoding.Decoders {
                         } */
                         i++;
                     }
+                }
             }
             // channels == 2
         }
@@ -1593,8 +1608,7 @@ namespace MP3Sharp.Decoding.Decoders {
                 bt = windowSwitchingFlag && mixedBlockFlag && sb18 < 36 ? 0 : blockType;
 
                 // 优化数组复制
-                for (int cc = 0; cc < 18; cc++)
-                    tsOutCopy[cc] = tsOut[cc + sb18];
+                Array.Copy(tsOut, sb18, tsOutCopy, 0, 18);
                 
                 InverseMdct(tsOutCopy, rawout, bt);
                 
@@ -1612,10 +1626,12 @@ namespace MP3Sharp.Decoding.Decoders {
         /// </summary>
         private void DoDownMix() {
             for (int sb = 0; sb < SSLIMIT; sb++) {
+                float[] lr0 = _Lr[0][sb];
+                float[] lr1 = _Lr[1][sb];
                 for (int ss = 0; ss < SSLIMIT; ss += 3) {
-                    _Lr[0][sb][ss] = (_Lr[0][sb][ss] + _Lr[1][sb][ss]) * 0.5f;
-                    _Lr[0][sb][ss + 1] = (_Lr[0][sb][ss + 1] + _Lr[1][sb][ss + 1]) * 0.5f;
-                    _Lr[0][sb][ss + 2] = (_Lr[0][sb][ss + 2] + _Lr[1][sb][ss + 2]) * 0.5f;
+                    lr0[ss] = (lr0[ss] + lr1[ss]) * 0.5f;
+                    lr0[ss + 1] = (lr0[ss + 1] + lr1[ss + 1]) * 0.5f;
+                    lr0[ss + 2] = (lr0[ss + 2] + lr1[ss + 2]) * 0.5f;
                 }
             }
         }
