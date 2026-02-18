@@ -703,12 +703,12 @@ namespace MP3Sharp.Decoding {
             // 0..31 Huffman code table 0..31
             // 32,33 count1-tables
 
-            int dmask = 1 << (4 * 8 - 1);
             int point = 0;
             int error = 1;
-            int level = dmask;
+            uint level = 1u << 31;
+            int[][] valTab = h._Val;
 
-            if (h._Val == null)
+            if (valTab == null)
                 return 2;
 
             /* table 0 needs no bits */
@@ -724,10 +724,12 @@ namespace MP3Sharp.Decoding {
             
             int bits[] = bitbuf;*/
             do {
-                if (h._Val[point][0] == 0) {
+                int node0 = valTab[point][0];
+                int node1 = valTab[point][1];
+                if (node0 == 0) {
                     /*end of tree*/
-                    x[0] = SupportClass.URShift(h._Val[point][1], 4);
-                    y[0] = h._Val[point][1] & 0xf;
+                    x[0] = node1 >> 4;
+                    y[0] = node1 & 0xf;
                     error = 0;
                     break;
                 }
@@ -743,18 +745,24 @@ namespace MP3Sharp.Decoding {
                 */
                 //if (bits[bitIndex++]!=0)
                 if (br.ReadOneBit() != 0) {
-                    while (h._Val[point][1] >= MXOFF)
-                        point += h._Val[point][1];
-                    point += h._Val[point][1];
+                    int off = node1;
+                    while (off >= MXOFF) {
+                        point += off;
+                        off = valTab[point][1];
+                    }
+                    point += off;
                 }
                 else {
-                    while (h._Val[point][0] >= MXOFF)
-                        point += h._Val[point][0];
-                    point += h._Val[point][0];
+                    int off = node0;
+                    while (off >= MXOFF) {
+                        point += off;
+                        off = valTab[point][0];
+                    }
+                    point += off;
                 }
-                level = SupportClass.URShift(level, 1);
+                level >>= 1;
                 // MDM: ht[0] is always 0;
-            } while (level != 0 || point < 0);
+            } while (level != 0);
 
             // put back any bits not consumed
             /*    
@@ -773,36 +781,29 @@ namespace MP3Sharp.Decoding {
                 /* v, w, x and y are reversed in the bitstream.
                 switch them around to make test bistream work. */
 
-                if (v[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        v[0] = -v[0];
-                if (w[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        w[0] = -w[0];
-                if (x[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        x[0] = -x[0];
-                if (y[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        y[0] = -y[0];
+                if (v[0] != 0 && br.ReadOneBit() != 0)
+                    v[0] = -v[0];
+                if (w[0] != 0 && br.ReadOneBit() != 0)
+                    w[0] = -w[0];
+                if (x[0] != 0 && br.ReadOneBit() != 0)
+                    x[0] = -x[0];
+                if (y[0] != 0 && br.ReadOneBit() != 0)
+                    y[0] = -y[0];
             }
             else {
                 // Process sign and escape encodings for dual tables.
                 // x and y are reversed in the test bitstream.
                 // Reverse x and y here to make test bitstream work.
 
-                if (h._Linbits != 0)
-                    if (h._Xlen - 1 == x[0])
-                        x[0] += br.ReadBits(h._Linbits);
-                if (x[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        x[0] = -x[0];
-                if (h._Linbits != 0)
-                    if (h._Ylen - 1 == y[0])
-                        y[0] += br.ReadBits(h._Linbits);
-                if (y[0] != 0)
-                    if (br.ReadOneBit() != 0)
-                        y[0] = -y[0];
+                int linbits = h._Linbits;
+                if (linbits != 0 && h._Xlen - 1 == x[0])
+                    x[0] += br.ReadBits(linbits);
+                if (x[0] != 0 && br.ReadOneBit() != 0)
+                    x[0] = -x[0];
+                if (linbits != 0 && h._Ylen - 1 == y[0])
+                    y[0] += br.ReadBits(linbits);
+                if (y[0] != 0 && br.ReadOneBit() != 0)
+                    y[0] = -y[0];
             }
             return error;
         }

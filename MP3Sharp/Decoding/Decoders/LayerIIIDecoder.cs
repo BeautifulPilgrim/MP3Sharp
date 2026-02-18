@@ -1700,53 +1700,7 @@ namespace MP3Sharp.Decoding.Decoders {
             float tmpf10, tmpf11, tmpf12, tmpf13, tmpf14, tmpf15, tmpf16, tmpf17;
 
             if (blockType == 2) {
-                /*
-                *
-                * Under MicrosoftVM 2922, This causes a GPF, or
-                * At best, an ArrayIndexOutOfBoundsExceptin.
-                for(int p=0;p<36;p+=9)
-                {
-                out[p]   = out[p+1] = out[p+2] = out[p+3] =
-                out[p+4] = out[p+5] = out[p+6] = out[p+7] =
-                out[p+8] = 0.0f;
-                }
-                */
-                outValues[0] = 0.0f;
-                outValues[1] = 0.0f;
-                outValues[2] = 0.0f;
-                outValues[3] = 0.0f;
-                outValues[4] = 0.0f;
-                outValues[5] = 0.0f;
-                outValues[6] = 0.0f;
-                outValues[7] = 0.0f;
-                outValues[8] = 0.0f;
-                outValues[9] = 0.0f;
-                outValues[10] = 0.0f;
-                outValues[11] = 0.0f;
-                outValues[12] = 0.0f;
-                outValues[13] = 0.0f;
-                outValues[14] = 0.0f;
-                outValues[15] = 0.0f;
-                outValues[16] = 0.0f;
-                outValues[17] = 0.0f;
-                outValues[18] = 0.0f;
-                outValues[19] = 0.0f;
-                outValues[20] = 0.0f;
-                outValues[21] = 0.0f;
-                outValues[22] = 0.0f;
-                outValues[23] = 0.0f;
-                outValues[24] = 0.0f;
-                outValues[25] = 0.0f;
-                outValues[26] = 0.0f;
-                outValues[27] = 0.0f;
-                outValues[28] = 0.0f;
-                outValues[29] = 0.0f;
-                outValues[30] = 0.0f;
-                outValues[31] = 0.0f;
-                outValues[32] = 0.0f;
-                outValues[33] = 0.0f;
-                outValues[34] = 0.0f;
-                outValues[35] = 0.0f;
+                Array.Clear(outValues, 0, 36);
 
                 int sixI = 0;
 
