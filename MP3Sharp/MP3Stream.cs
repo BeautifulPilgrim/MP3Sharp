@@ -218,6 +218,41 @@ namespace MP3Sharp {
         }
 
         /// <summary>
+        /// Decodes the entire MP3 stream to a single PCM byte array.
+        /// This will advance the stream to EOF.
+        /// </summary>
+        public byte[] DecodeAllPcm() {
+            using var ms = new MemoryStream();
+            DecodeAllPcm(ms);
+            return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Decodes the entire MP3 stream and writes PCM bytes to the provided output stream.
+        /// This will advance the stream to EOF.
+        /// </summary>
+        public void DecodeAllPcm(Stream output) {
+            if (output == null) {
+                throw new ArgumentNullException(nameof(output));
+            }
+            if (!output.CanWrite) {
+                throw new ArgumentException("Output stream must be writable.", nameof(output));
+            }
+
+            const int DefaultChunkSize = 256 * 1024;
+            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(DefaultChunkSize);
+            try {
+                int read;
+                while ((read = Read(buffer, 0, buffer.Length)) > 0) {
+                    output.Write(buffer, 0, read);
+                }
+            }
+            finally {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        /// <summary>
         /// Closes the source stream and releases any associated resources.
         /// If you don't call this, you may be leaking file descriptors.
         /// </summary>
