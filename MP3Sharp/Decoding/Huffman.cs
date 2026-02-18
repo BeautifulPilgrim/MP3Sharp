@@ -23,6 +23,7 @@ namespace MP3Sharp.Decoding {
     internal sealed class Huffman {
         private const int MXOFF = 250;
         private const int HTN = 34;
+        private const int LOOKUP_BITS = 10;
         private static readonly int[][] ValTab0 = {new[] {0, 0}};
 
         private static readonly int[][] ValTab1 = {
@@ -672,6 +673,8 @@ namespace MP3Sharp.Decoding {
         private readonly int _RefRenamed; //a positive value indicates a reference
         private readonly int[] _Table; //pointer to array[xlen][ylen]
         private readonly char _Tablename2; //string, containing table_description
+        private short[] _Lookup;
+        private byte[] _LookupBits;
 
         static Huffman() { }
 
@@ -717,18 +720,39 @@ namespace MP3Sharp.Decoding {
                 return 0;
             }
 
-            /* Lookup in Huffman table. */
+            /* Prefix lookup (fast path). */
+            bool decoded = false;
+            if (h._Lookup != null) {
+                int prefix = br.ReadBits(LOOKUP_BITS);
+                int leaf = h._Lookup[prefix];
+                if (leaf >= 0) {
+                    int used = h._LookupBits[prefix];
+                    if (used < LOOKUP_BITS) {
+                        br.RewindStreamBits(LOOKUP_BITS - used);
+                    }
+                    x[0] = leaf >> 4;
+                    y[0] = leaf & 0xf;
+                    error = 0;
+                    decoded = true;
+                }
+                else {
+                    br.RewindStreamBits(LOOKUP_BITS);
+                }
+            }
+
+            if (!decoded) {
+                /* Lookup in Huffman table. */
 
             /*int bitsAvailable = 0;     
             int bitIndex = 0;
             
             int bits[] = bitbuf;*/
-            do {
-                int node0 = valTab[point][0];
-                int node1 = valTab[point][1];
-                if (node0 == 0) {
-                    /*end of tree*/
-                    x[0] = node1 >> 4;
+                do {
+                    int node0 = valTab[point][0];
+                    int node1 = valTab[point][1];
+                    if (node0 == 0) {
+                        /*end of tree*/
+                        x[0] = node1 >> 4;
                     y[0] = node1 & 0xf;
                     error = 0;
                     break;
@@ -761,8 +785,9 @@ namespace MP3Sharp.Decoding {
                     point += off;
                 }
                 level >>= 1;
-                // MDM: ht[0] is always 0;
-            } while (level != 0);
+                    // MDM: ht[0] is always 0;
+                } while (level != 0);
+            }
 
             // put back any bits not consumed
             /*    
@@ -847,6 +872,55 @@ namespace MP3Sharp.Decoding {
             HuffmanTable[31] = new Huffman("31 ", 16, 16, 13, 8191, 24, null, null, ValTab24, 512);
             HuffmanTable[32] = new Huffman("32 ", 1, 16, 0, 0, -1, null, null, ValTab32, 31);
             HuffmanTable[33] = new Huffman("33 ", 1, 16, 0, 0, -1, null, null, ValTab33, 31);
+            for (int i = 0; i < HuffmanTable.Length; i++) {
+                HuffmanTable[i].BuildLookupTable();
+            }
+        }
+
+        private void BuildLookupTable() {
+            if (_Val == null || _Treelen == 0) {
+                return;
+            }
+            _Lookup = new short[1 << LOOKUP_BITS];
+            _LookupBits = new byte[_Lookup.Length];
+            for (int i = 0; i < _Lookup.Length; i++) {
+                _Lookup[i] = -1;
+            }
+
+            for (int prefix = 0; prefix < _Lookup.Length; prefix++) {
+                int point = 0;
+                int consumed = 0;
+                bool found = false;
+                for (int b = LOOKUP_BITS - 1; b >= 0; b--) {
+                    int node0 = _Val[point][0];
+                    if (node0 == 0) {
+                        found = true;
+                        break;
+                    }
+                    int bit = (prefix >> b) & 1;
+                    point = ResolveOffset(point, bit);
+                    consumed++;
+                }
+
+                if (!found && _Val[point][0] == 0) {
+                    found = true;
+                }
+
+                if (found) {
+                    _Lookup[prefix] = (short)_Val[point][1];
+                    _LookupBits[prefix] = (byte)consumed;
+                }
+            }
+        }
+
+        private int ResolveOffset(int point, int bit) {
+            int idx = bit != 0 ? 1 : 0;
+            int off = _Val[point][idx];
+            while (off >= MXOFF) {
+                point += off;
+                off = _Val[point][idx];
+            }
+            return point + off;
         }
     }
 }

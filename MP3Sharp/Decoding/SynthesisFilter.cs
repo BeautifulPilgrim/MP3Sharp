@@ -15,6 +15,11 @@
 //  ***************************************************************************/
 
 using System;
+#if NET8_0_OR_GREATER
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace MP3Sharp.Decoding {
     /// <summary>
@@ -65,6 +70,9 @@ namespace MP3Sharp.Decoding {
         /// more faster access by allowing a block of 16 to be addressed
         /// with constant offset.
         private static float[][] _d16;
+#if NET8_0_OR_GREATER
+        private static float[] _d16Rot; // phase-rotated d16 coefficients
+#endif
 
         // The original data for d[]. This data (was) loaded from a file
         // to reduce the overall package size and to improve performance. 
@@ -227,6 +235,9 @@ namespace MP3Sharp.Decoding {
             if (_d == null) {
                 _d = DData; // load_d();
                 _d16 = SplitArray(_d, 16);
+#if NET8_0_OR_GREATER
+                _d16Rot = BuildRotatedD16(_d16);
+#endif
             }
 
             _V1 = new float[512];
@@ -996,6 +1007,9 @@ namespace MP3Sharp.Decoding {
         }
 
         private void compute_pc_samples(ABuffer buffer) {
+#if NET8_0_OR_GREATER
+            ComputePcSamplesPhase(_ActualWritePos);
+#else
             switch (_ActualWritePos) {
                 case 0:
                     compute_pc_samples0(buffer);
@@ -1061,6 +1075,7 @@ namespace MP3Sharp.Decoding {
                     Compute_pc_samples15(buffer);
                     break;
             }
+#endif
 
             buffer?.AppendSamples(_Channel, _TmpOut);
         }
@@ -1111,6 +1126,74 @@ namespace MP3Sharp.Decoding {
             }
             return split;
         }
+
+#if NET8_0_OR_GREATER
+        private static float[] BuildRotatedD16(float[][] d16) {
+            float[] rot = new float[16 * 32 * 16];
+            int idx = 0;
+            for (int phase = 0; phase < 16; phase++) {
+                for (int i = 0; i < 32; i++) {
+                    float[] dp = d16[i];
+                    for (int k = 0; k < 16; k++) {
+                        rot[idx++] = dp[(phase - k) & 15];
+                    }
+                }
+            }
+            return rot;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static unsafe float Dot16(float* a, float* b) {
+            if (Avx.IsSupported) {
+                Vector256<float> v0 = Avx.LoadVector256(a);
+                Vector256<float> v1 = Avx.LoadVector256(a + 8);
+                Vector256<float> d0 = Avx.LoadVector256(b);
+                Vector256<float> d1 = Avx.LoadVector256(b + 8);
+                Vector256<float> m0 = Avx.Multiply(v0, d0);
+                Vector256<float> m1 = Avx.Multiply(v1, d1);
+                Vector256<float> sum = Avx.Add(m0, m1);
+                float* tmp = stackalloc float[8];
+                Avx.Store(tmp, sum);
+                return tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+            }
+            if (Sse.IsSupported) {
+                Vector128<float> acc0 = Sse.Multiply(Sse.LoadVector128(a), Sse.LoadVector128(b));
+                Vector128<float> acc1 = Sse.Multiply(Sse.LoadVector128(a + 4), Sse.LoadVector128(b + 4));
+                Vector128<float> acc2 = Sse.Multiply(Sse.LoadVector128(a + 8), Sse.LoadVector128(b + 8));
+                Vector128<float> acc3 = Sse.Multiply(Sse.LoadVector128(a + 12), Sse.LoadVector128(b + 12));
+                Vector128<float> sum01 = Sse.Add(acc0, acc1);
+                Vector128<float> sum23 = Sse.Add(acc2, acc3);
+                Vector128<float> sum = Sse.Add(sum01, sum23);
+                float* tmp = stackalloc float[4];
+                Sse.Store(tmp, sum);
+                return tmp[0] + tmp[1] + tmp[2] + tmp[3];
+            }
+            float s = 0f;
+            for (int i = 0; i < 16; i++) {
+                s += a[i] * b[i];
+            }
+            return s;
+        }
+
+        private unsafe void ComputePcSamplesPhase(int phase) {
+            float[] vp = _ActualV;
+            float[] tmpOut = _TmpOut;
+            float scalefactor = _Scalefactor;
+
+            fixed (float* vpPtr = vp)
+            fixed (float* coeffBase = _d16Rot) {
+                int dvp = 0;
+                int coeffIndex = phase * 32 * 16;
+                for (int i = 0; i < 32; i++) {
+                    float* v = vpPtr + dvp;
+                    float* d = coeffBase + coeffIndex;
+                    tmpOut[i] = Dot16(v, d) * scalefactor;
+                    dvp += 16;
+                    coeffIndex += 16;
+                }
+            }
+        }
+#endif
 
         private static float[] SubArray(float[] array, int offs, int len) {
             if (offs + len > array.Length) {
