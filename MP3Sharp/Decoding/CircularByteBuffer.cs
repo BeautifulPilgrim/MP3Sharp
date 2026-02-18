@@ -106,6 +106,70 @@ namespace MP3Sharp.Decoding {
             return ret;
         }
 
+        internal void PushRange(byte[] source, int sourceOffset, int count) {
+            if (source == null) {
+                throw new ArgumentNullException(nameof(source));
+            }
+            if (count <= 0) {
+                return;
+            }
+            lock (this) {
+                if (count >= _Length) {
+                    int start = sourceOffset + (count - _Length);
+                    Buffer.BlockCopy(source, start, _Buffer, 0, _Length);
+                    _Index = 0;
+                    _NumValid = _Length;
+                    return;
+                }
+
+                int first = Math.Min(count, _Length - _Index);
+                Buffer.BlockCopy(source, sourceOffset, _Buffer, _Index, first);
+                int remaining = count - first;
+                if (remaining > 0) {
+                    Buffer.BlockCopy(source, sourceOffset + first, _Buffer, 0, remaining);
+                }
+
+                _Index += count;
+                if (_Index >= _Length) {
+                    _Index -= _Length;
+                }
+                _NumValid += count;
+                if (_NumValid > _Length) {
+                    _NumValid = _Length;
+                }
+            }
+        }
+
+        internal int GetStartIndexForOldestOfLast(int count) {
+            if (count < 0 || count > _Length) {
+                throw new ArgumentOutOfRangeException(nameof(count));
+            }
+            lock (this) {
+                int start = _Index - count;
+                if (start < 0) {
+                    start += _Length;
+                }
+                return start;
+            }
+        }
+
+        internal void CopyFromIndex(sbyte[] destination, int destinationOffset, int startIndex, int count) {
+            if (destination == null) {
+                throw new ArgumentNullException(nameof(destination));
+            }
+            if (count <= 0) {
+                return;
+            }
+            lock (this) {
+                int first = Math.Min(count, _Length - startIndex);
+                Buffer.BlockCopy(_Buffer, startIndex, destination, destinationOffset, first);
+                int remaining = count - first;
+                if (remaining > 0) {
+                    Buffer.BlockCopy(_Buffer, 0, destination, destinationOffset + first, remaining);
+                }
+            }
+        }
+
         /// <summary>
         /// Pop an integer off the start of the buffer. Throws an exception if the buffer is empty (NumValid == 0)
         /// </summary>

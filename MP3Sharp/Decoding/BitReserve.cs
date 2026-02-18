@@ -32,27 +32,32 @@ namespace MP3Sharp.Decoding {
         /// Must be a power of 2. And x8, as each bit is stored as a single
         /// entry.
         /// </summary>
-        private const int BUFSIZE = 4096 * 8;
+        private const int BUFSIZE_BITS = 4096 * 8;
+        private const int BUFSIZE_BYTES = 4096;
 
         /// <summary>
         /// Mask that can be used to quickly implement the
         /// modulus operation on BUFSIZE.
         /// </summary>
-        private const int BUFSIZE_MASK = BUFSIZE - 1;
+        private const int BUFSIZE_MASK_BYTES = BUFSIZE_BYTES - 1;
 
-        private int[] _Buffer;
-        private int _Offset, _Totbit, _BufByteIdx;
+        private byte[] _Buffer;
+        private int _WriteByteIdx;
+        private int _ReadByteIdx;
+        private int _ReadBitIdx;
+        private int _Totbit;
 
         internal BitReserve() {
             InitBlock();
 
-            _Offset = 0;
+            _WriteByteIdx = 0;
+            _ReadByteIdx = 0;
+            _ReadBitIdx = 0;
             _Totbit = 0;
-            _BufByteIdx = 0;
         }
 
         private void InitBlock() {
-            _Buffer = new int[BUFSIZE];
+            _Buffer = new byte[BUFSIZE_BYTES];
         }
 
         /// <summary>
@@ -67,22 +72,32 @@ namespace MP3Sharp.Decoding {
             _Totbit += n;
 
             int val = 0;
+            int bytePos = _ReadByteIdx;
+            int bitPos = _ReadBitIdx;
 
-            int pos = _BufByteIdx;
-            if (pos + n < BUFSIZE) {
-                while (n-- > 0) {
-                    val <<= 1;
-                    val |= _Buffer[pos++] != 0 ? 1 : 0;
-                }
+            // Fast path: consume whole bytes when aligned.
+            while (n >= 8 && bitPos == 0) {
+                val = (val << 8) | _Buffer[bytePos];
+                bytePos = (bytePos + 1) & BUFSIZE_MASK_BYTES;
+                n -= 8;
             }
-            else {
-                while (n-- > 0) {
-                    val <<= 1;
-                    val |= _Buffer[pos] != 0 ? 1 : 0;
-                    pos = (pos + 1) & BUFSIZE_MASK;
+
+            while (n > 0) {
+                int remainingInByte = 8 - bitPos;
+                int take = n < remainingInByte ? n : remainingInByte;
+                int shift = remainingInByte - take;
+                int bits = (_Buffer[bytePos] >> shift) & ((1 << take) - 1);
+                val = (val << take) | bits;
+                bitPos += take;
+                if (bitPos == 8) {
+                    bitPos = 0;
+                    bytePos = (bytePos + 1) & BUFSIZE_MASK_BYTES;
                 }
+                n -= take;
             }
-            _BufByteIdx = pos;
+
+            _ReadByteIdx = bytePos;
+            _ReadBitIdx = bitPos;
             return val;
         }
 
@@ -91,8 +106,12 @@ namespace MP3Sharp.Decoding {
         /// </summary>
         internal int ReadOneBit() {
             _Totbit++;
-            int val = _Buffer[_BufByteIdx];
-            _BufByteIdx = (_BufByteIdx + 1) & BUFSIZE_MASK;
+            int val = (_Buffer[_ReadByteIdx] >> (7 - _ReadBitIdx)) & 0x1;
+            _ReadBitIdx++;
+            if (_ReadBitIdx == 8) {
+                _ReadBitIdx = 0;
+                _ReadByteIdx = (_ReadByteIdx + 1) & BUFSIZE_MASK_BYTES;
+            }
             return val;
         }
 
@@ -100,19 +119,8 @@ namespace MP3Sharp.Decoding {
         /// Write 8 bits into the bit stream.
         /// </summary>
         internal void PutBuffer(int val) {
-            int ofs = _Offset;
-            _Buffer[ofs++] = val & 0x80;
-            _Buffer[ofs++] = val & 0x40;
-            _Buffer[ofs++] = val & 0x20;
-            _Buffer[ofs++] = val & 0x10;
-            _Buffer[ofs++] = val & 0x08;
-            _Buffer[ofs++] = val & 0x04;
-            _Buffer[ofs++] = val & 0x02;
-            _Buffer[ofs++] = val & 0x01;
-            if (ofs == BUFSIZE)
-                _Offset = 0;
-            else
-                _Offset = ofs;
+            _Buffer[_WriteByteIdx] = (byte)val;
+            _WriteByteIdx = (_WriteByteIdx + 1) & BUFSIZE_MASK_BYTES;
         }
 
         /// <summary>
@@ -120,9 +128,12 @@ namespace MP3Sharp.Decoding {
         /// </summary>
         internal void RewindStreamBits(int bitCount) {
             _Totbit -= bitCount;
-            _BufByteIdx -= bitCount;
-            if (_BufByteIdx < 0)
-                _BufByteIdx += BUFSIZE;
+            int bitPos = (_ReadByteIdx << 3) + _ReadBitIdx - bitCount;
+            if (bitPos < 0) {
+                bitPos += BUFSIZE_BITS;
+            }
+            _ReadByteIdx = (bitPos >> 3) & BUFSIZE_MASK_BYTES;
+            _ReadBitIdx = bitPos & 7;
         }
 
         /// <summary>
@@ -130,10 +141,7 @@ namespace MP3Sharp.Decoding {
         /// </summary>
         internal void RewindStreamBytes(int byteCount) {
             int bits = byteCount << 3;
-            _Totbit -= bits;
-            _BufByteIdx -= bits;
-            if (_BufByteIdx < 0)
-                _BufByteIdx += BUFSIZE;
+            RewindStreamBits(bits);
         }
     }
 }

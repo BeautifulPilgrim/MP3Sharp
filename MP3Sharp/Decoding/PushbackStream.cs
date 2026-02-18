@@ -44,19 +44,25 @@ namespace MP3Sharp.Decoding {
             bool canReadStream = true;
             while (index < length && canReadStream) {
                 if (_NumForwardBytesInBuffer > 0) {
-                    // from memory
-                    _NumForwardBytesInBuffer--;
-                    readBuffer[offset + index] = (sbyte)_CircularByteBuffer[_NumForwardBytesInBuffer];
-                    index++;
+                    // from memory (oldest unread first)
+                    int take = _NumForwardBytesInBuffer;
+                    int remaining = length - index;
+                    if (take > remaining) {
+                        take = remaining;
+                    }
+                    int start = _CircularByteBuffer.GetStartIndexForOldestOfLast(_NumForwardBytesInBuffer);
+                    _CircularByteBuffer.CopyFromIndex(readBuffer, offset + index, start, take);
+                    _NumForwardBytesInBuffer -= take;
+                    index += take;
                 }
                 else {
                     // from stream
                     int countBytesToRead = length - index > _TemporaryBuffer.Length ? _TemporaryBuffer.Length : length - index;
                     int countBytesRead = _Stream.Read(_TemporaryBuffer, 0, countBytesToRead);
                     canReadStream = countBytesRead >= countBytesToRead;
-                    for (int i = 0; i < countBytesRead; i++) {
-                        _CircularByteBuffer.Push(_TemporaryBuffer[i]);
-                        readBuffer[offset + index + i] = (sbyte)_TemporaryBuffer[i];
+                    if (countBytesRead > 0) {
+                        _CircularByteBuffer.PushRange(_TemporaryBuffer, 0, countBytesRead);
+                        Buffer.BlockCopy(_TemporaryBuffer, 0, readBuffer, offset + index, countBytesRead);
                     }
                     index += countBytesRead;
                 }
